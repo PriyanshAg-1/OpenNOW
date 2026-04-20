@@ -1,0 +1,73 @@
+name: auto-build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "opennow-stable/**"
+      - ".github/workflows/auto-build.yml"
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - "opennow-stable/**"
+      - ".github/workflows/auto-build.yml"
+
+concurrency:
+  group: auto-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: windows
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: opennow-stable
+
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+      npm_config_audit: "false"
+      npm_config_fund: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: "**/package-lock.json"
+
+      - name: Cache Electron binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/.cache/electron
+            ${{ github.workspace }}/.cache/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit --progress=false
+
+      - name: Build app bundles
+        run: npm run build
+
+      - name: Package installers
+        run: npx electron-builder --publish never --win nsis portable
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennow-stable-windows
+          path: opennow-stable/dist-release/*.exe
+          if-no-files-found: error
